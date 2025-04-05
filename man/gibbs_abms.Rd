@@ -19,6 +19,10 @@ gibbs_abms(
   b0 = 1,
   d = 2,
   b2 = 1/2,
+  model_fixed = NULL,
+  WomackPrior = TRUE,
+  a_bb = 1,
+  b_bb = 1,
   count.iteration = TRUE
 )
 }
@@ -64,6 +68,14 @@ Note thas this argument do not exist for \code{family=LoR} and \code{family=SNR}
 \item{d}{For the Skew-Normal regression only. It is the location hyper-parameter of the t-student prior to the parameter \eqn{lambda} (asymmetric parameter of the Skew-Normal distribution). By default is fixed at 2, which is recommended.}
 
 \item{b2}{For the Skew-Normal regression only. It is the scale hyper-parameter of the t-student prior to the parameter lambda (asymmetric parameter of the Skew-Normal distribution). By default is fixed at 1/2, which is recommended.}
+
+\item{model_fixed}{Either \code{NULL} or a vector that indicates which model will be fixed to perform parameter estimation only under such a model. For example, if there are only three predictors and \code{model.fixed=c(1,3)}, only parameter estimation will be performed where only the first and third predictors are included. If \code{NULL}, model selection will also be performed. Fixed at \code{NULL} by default.}
+
+\item{WomackPrior}{A logical argument. If \code{TRUE}, the Womack prior for the model space will be used. Otherwise, the Beta-Binomial prior with shape parameters \code{a_bb} and \code{b_bb} will be used. Fixed at \code{TRUE} by default}
+
+\item{a_bb}{A numeric vector of length 1. The first shape parameter of the Beta-Binomial prior. Recomended value is \code{a_bb=1}.}
+
+\item{b_bb}{A numeric vector of length 1. The second shape parameter of the Beta-Binomial prior. Recomended value is \code{b_bb=p_selection^u}, where \code{u}>1, and \code{p_selection} is the number of predictors under the selection process.}
 
 \item{count.iteration}{A logical argument. If \code{TRUE}, a counter for the Gibbs sampler iterations will be displayed. Fixed at \code{TRUE} by deafult.}
 }

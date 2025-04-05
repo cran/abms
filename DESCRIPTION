@@ -1,6 +1,6 @@
 Package: abms
 Title: Augmented Bayesian Model Selection for Regression Models
-Version: 0.1
+Version: 0.2
 Authors@R: c(
     person("Francisco", "Segovia", role = c("aut", "cre"), email = "fasegovia@uc.cl"),
     person("Luis", "Gutierres", role = c("aut"), email = "llgutier@mat.uc.cl"),
@@ -15,10 +15,10 @@ Imports: BayesLogit, GIGrvg, mvtnorm, truncnorm
 Depends: R (>= 3.6.0)
 LazyData: true
 NeedsCompilation: no
-Packaged: 2025-03-12 01:15:35 UTC; asus
+Packaged: 2025-04-05 21:17:15 UTC; asus
 Author: Francisco Segovia [aut, cre],
   Luis Gutierres [aut],
   Ramses Mena [aut]
 Maintainer: Francisco Segovia <fasegovia@uc.cl>
 Repository: CRAN
-Date/Publication: 2025-03-13 13:10:02 UTC
+Date/Publication: 2025-04-05 21:30:03 UTC

@@ -94,6 +94,10 @@ rCRT<-function(n,b,c)
 #' Note thas this argument do not exist for \code{family=LoR} and \code{family=SNR}. For all hierarchical regression models, it must be a positive real number and its fixed at 1 by deafault.
 #' @param d For the Skew-Normal regression only. It is the location hyper-parameter of the t-student prior to the parameter \eqn{lambda} (asymmetric parameter of the Skew-Normal distribution). By default is fixed at 2, which is recommended.
 #' @param b2 For the Skew-Normal regression only. It is the scale hyper-parameter of the t-student prior to the parameter lambda (asymmetric parameter of the Skew-Normal distribution). By default is fixed at 1/2, which is recommended.
+#' @param model_fixed Either \code{NULL} or a vector that indicates which model will be fixed to perform parameter estimation only under such a model. For example, if there are only three predictors and \code{model.fixed=c(1,3)}, only parameter estimation will be performed where only the first and third predictors are included. If \code{NULL}, model selection will also be performed. Fixed at \code{NULL} by default.
+#' @param WomackPrior A logical argument. If \code{TRUE}, the Womack prior for the model space will be used. Otherwise, the Beta-Binomial prior with shape parameters \code{a_bb} and \code{b_bb} will be used. Fixed at \code{TRUE} by default
+#' @param a_bb A numeric vector of length 1. The first shape parameter of the Beta-Binomial prior. Recomended value is \code{a_bb=1}.
+#' @param b_bb A numeric vector of length 1. The second shape parameter of the Beta-Binomial prior. Recomended value is \code{b_bb=p_selection^u}, where \code{u}>1, and \code{p_selection} is the number of predictors under the selection process.
 #' @param count.iteration A logical argument. If \code{TRUE}, a counter for the Gibbs sampler iterations will be displayed. Fixed at \code{TRUE} by deafult.
 #' @return A abms object with the following variables:
 #' @return \item{family}{This character object prints the name of the fitted hierarchical regression model. It needs to be extracted from the list 'Default'.}
@@ -145,7 +149,7 @@ rCRT<-function(n,b,c)
 
 
 gibbs_abms<-function(y, Covariates, family="LiR", first_excluded=0, nchain=10000, burnin=2000, tau2=1000, rho=1, ni=rep(1, length(y)), alpha=0.5,
-                     a0=1, b0=1, d=2, b2=1/2, count.iteration=TRUE )
+                     a0=1, b0=1, d=2, b2=1/2, model_fixed=NULL, WomackPrior=TRUE, a_bb=1, b_bb=1, count.iteration=TRUE )
 {
   print.abms <- function(m){
     print(m$Default)
@@ -159,16 +163,34 @@ gibbs_abms<-function(y, Covariates, family="LiR", first_excluded=0, nchain=10000
   if(tau2<=0){stop(paste("'tau2' must be a positive integer")) }
   if(tau2<=10) warning("It is recomended for 'tau2' equal at least 1000.")
   if(rho<=0){stop(paste("'rho' must be a positive integer")) }
+  if(!inherits(model_fixed,"NULL") && !inherits(model_fixed,"numeric")){ stop(paste("'model_fixed' must be NULL or a vector of size 'p-1' at most")) }
+  if(inherits(model_fixed,"numeric") && length(model_fixed)>(ncol(Covariates)) ){ stop(paste("'model_fixed' must be a vector of size 'p-1' at most")) }
+  if(WomackPrior!=TRUE && WomackPrior!=FALSE){stop(paste("'WomackPrior' must be either TRUE or FALSE")) }
   if(count.iteration!=TRUE && count.iteration!=FALSE){stop(paste("'count.iteration' must be either TRUE or FALSE")) }
 
   if(a0<=0){stop(paste("'a0' must be a positive real number")) }
   if(b0<=0){stop(paste("'b0' must be a positive real number")) }
-  if(length(ni)!=length(y) || any(ni<0)){stop(paste("'ni' must be a positive integer vector with same size as 'y'")) }
+  if(inherits(family,"LoR") && (length(ni)!=length(y) || any(ni<0)) ){stop(paste("'ni' must be a positive integer vector with same size as 'y'")) }
   if(alpha>1 || alpha<0){stop(paste("'alpha' must be between 0 and 1")) }
   if(d<=0){stop(paste("'d' must be a positive real number")) }
   if(b2<=0){stop(paste("'b2' must be a positive real number")) }
+  if(a_bb<=0){stop(paste("'a_bb' must be a positive real number")) }
+  if(b_bb<=0){stop(paste("'b_bb' must be a positive real number")) }
 
   t0<-proc.time()
+
+  ## Beta-Binomial pior2 PDF
+  BetaBinomialPrior<-function(p, a, b)
+  {
+    aux<-vector(length=p+1)
+    for(i in 0:p)
+    {
+      aux[i+1]<-beta(a=a +i, b=p +b -i)/beta(a=a,b=b)
+    }
+    return(aux)
+  }
+
+
   ##############################
   ##	   Initiating	    ##
   ##############################
@@ -253,7 +275,10 @@ gibbs_abms<-function(y, Covariates, family="LiR", first_excluded=0, nchain=10000
 
   log_tau2<-base::log(tau2)
   frac_tau2<-1/tau2
-  log_womack_prior<-base::log(womack(p_selection,rho))
+  if(WomackPrior==TRUE){ log_gamma_prior<-base::log(womack(p_selection,rho)) }else{
+    log_gamma_prior<-log( BetaBinomialPrior(p=p_selection, a=a_bb, b=b_bb) )
+  }
+
   InvDiag_tau2_general<-diag(frac_tau2, p)
   Omega_modified_general<-matrix(base::rep(t.chain[1,],each = p), nrow = p, ncol = N, byrow = F)
   tXgamma_Omega_general<-t(X)*Omega_modified_general[1:ncol(X),]
@@ -275,40 +300,55 @@ gibbs_abms<-function(y, Covariates, family="LiR", first_excluded=0, nchain=10000
   ######################
   for(i in 1:nchain)
   {
-    if(count.iteration==TRUE){cat("  Iteration", i, "of", nchain, "\r")}
+    if(count.iteration==TRUE){cat("  Iteracion", i, "de", nchain, "\r")}
 
-    ## Add-delete algorithm
-    aux_gamma<-sample(1:p_selection, size=1)
-    gammaCandidate<-gammaOld
-    gammaCandidate[aux_gamma]<-1 -gammaOld[aux_gamma]
-
-    for(k in 1:2)
+    if(is.null(model_fixed)==TRUE)
     {
-      if(k==1){gamma_aux<-gammaOld}else{gamma_aux<-gammaCandidate}
-      q_aux<-base::sum(gamma_aux)
-      X_index_aux[[k]]<-unique(c(X_index_aux_excluded, intercept_first_excluded +which(gamma_aux==1)))
+
+      ## Add-delete algorithm
+      aux_gamma<-sample(1:p_selection, size=1)
+      gammaCandidate<-gammaOld
+      gammaCandidate[aux_gamma]<-1 -gammaOld[aux_gamma]
+
+      for(k in 1:2)
+      {
+        if(k==1){gamma_aux<-gammaOld}else{gamma_aux<-gammaCandidate}
+        q_aux<-base::sum(gamma_aux)
+        X_index_aux[[k]]<-unique(c(X_index_aux_excluded, intercept_first_excluded +which(gamma_aux==1)))
+        X_gamma_aux[[k]]<-X[,X_index_aux[[k]]]
+        tXgamma_Omega_aux[[k]]<- tXgamma_Omega_general[X_index_aux[[k]],]
+        tXgamma_Omega_aux_Z<- tXgamma_Omega_Z_general[X_index_aux[[k]]]
+        InvDiag_tau2_aux<-InvDiag_tau2_general[1:(intercept_first_excluded +q_aux), 1:(intercept_first_excluded +q_aux)]
+        chol_V_aux[[k]]<- chol(NotInverse_V_general[X_index_aux[[k]], X_index_aux[[k]]])
+        V_aux[[k]]<- chol2inv(chol_V_aux[[k]])
+        det_V_aux<-1/prod(diag(chol_V_aux[[k]]))^(2)
+        if(det_V_aux<1e-10){det_V_aux<-1e-10}
+        m_aux[[k]]<-V_aux[[k]]%*%tXgamma_Omega_aux_Z
+        DAlog_weight_model[k]<-as.vector( (-q_aux/2)*log_tau2 +(0.5)*base::log(det_V_aux) +
+                                            (0.5)*t(m_aux[[k]])%*%tXgamma_Omega_aux_Z +log_gamma_prior[q_aux +1] )
+      }
+      A<- DAlog_weight_model -base::max(DAlog_weight_model)
+      b<-exp(A)
+      DAgamma_prob<-b/base::sum(b)
+
+      p_gammaOld<-DAgamma_prob[1]
+      p_gammaCandidate<-DAgamma_prob[2]
+      p_selectionCandidate<-min(p_gammaCandidate/p_gammaOld,1)
+      selection<-sample(c("Candidate","Old"), size=1, prob=c(p_selectionCandidate, 1-p_selectionCandidate))
+      if(selection=="Candidate"){gamma<-gammaCandidate; k<-2}else{gamma<-gammaOld; k<-1}
+      q<-base::sum(gamma)
+    }else{
+      gamma<-rep(0, p-1)
+      gamma[model_fixed]<-1
+      k<-1
+      X_index_aux[[k]]<-unique(c(X_index_aux_excluded, intercept_first_excluded +which(gamma==1)))
       X_gamma_aux[[k]]<-X[,X_index_aux[[k]]]
       tXgamma_Omega_aux[[k]]<- tXgamma_Omega_general[X_index_aux[[k]],]
       tXgamma_Omega_aux_Z<- tXgamma_Omega_Z_general[X_index_aux[[k]]]
-      InvDiag_tau2_aux<-InvDiag_tau2_general[1:(intercept_first_excluded +q_aux), 1:(intercept_first_excluded +q_aux)]
       chol_V_aux[[k]]<- chol(NotInverse_V_general[X_index_aux[[k]], X_index_aux[[k]]])
       V_aux[[k]]<- chol2inv(chol_V_aux[[k]])
-      det_V_aux<-1/prod(diag(chol_V_aux[[k]]))^(2)
-      if(det_V_aux<1e-10){det_V_aux<-1e-10}
       m_aux[[k]]<-V_aux[[k]]%*%tXgamma_Omega_aux_Z
-      DAlog_weight_model[k]<-as.vector( (-q_aux/2)*log_tau2 +(0.5)*base::log(det_V_aux) +
-                                          (0.5)*t(m_aux[[k]])%*%tXgamma_Omega_aux_Z +log_womack_prior[q_aux +1] )
     }
-    A<- DAlog_weight_model -base::max(DAlog_weight_model)
-    b<-exp(A)
-    DAgamma_prob<-b/base::sum(b)
-
-    p_gammaOld<-DAgamma_prob[1]
-    p_gammaCandidate<-DAgamma_prob[2]
-    p_selectionCandidate<-min(p_gammaCandidate/p_gammaOld,1)
-    selection<-sample(c("Candidate","Old"), size=1, prob=c(p_selectionCandidate, 1-p_selectionCandidate))
-    if(selection=="Candidate"){gamma<-gammaCandidate; k<-2}else{gamma<-gammaOld; k<-1}
-    q<-base::sum(gamma)
 
     ## Updating beta
     beta_index_0<-setdiff(1:p, X_index_aux[[k]])
@@ -474,6 +514,7 @@ gibbs_abms<-function(y, Covariates, family="LiR", first_excluded=0, nchain=10000
 }
 
 
+
 #' Summary function for abms objects
 #' @description For abms objects, it returns the posterior mean, standard deviation, and 95% centered credible interval for each parameter. Additionally, it provides all explored models alongside the conditional Bayes factors and marginal Bayes factors estimator between the most probable model and the others that have arisen.
 #' @param fit An abms object. Such object is obtained by fitting a regression model with the \code{gibbs_abms()} function.
@@ -489,8 +530,7 @@ gibbs_abms<-function(y, Covariates, family="LiR", first_excluded=0, nchain=10000
 
 summary_gibbs<-function(fit, BF=FALSE)
 {
-
-  if(!inherits(fit, "abms")){stop(paste("'fit' must be a 'abms' class object")) }
+  if(!inherits(fit,"abms")){stop(paste("'fit' must be a 'abms' class object")) }
   if(BF!=TRUE && BF!=FALSE){stop(paste("'BF' must be either TRUE or FALSE")) }
 
   ## Auxiliar function for Summary table for Gibbs sampler
@@ -565,12 +605,10 @@ summary_gibbs<-function(fit, BF=FALSE)
     New_ExploredModels<-ExploredModels
     for(j in 1:nrow(aux_ExploredModels))
     {
-      Conditional_BF<-mean(exp(loglik[[1]] -loglik[[j]]))
-      Marginal_BF<-exp( mean(loglik[[1]]) -mean(loglik[[j]]) )
-      New_ExploredModels[j,ncol(ExploredModels) +1]<-Conditional_BF
-      New_ExploredModels[j,ncol(ExploredModels) +2]<-Marginal_BF
+      Marginal_BF<-mean(loglik[[1]]) -mean(loglik[[j]])
+      New_ExploredModels[j,ncol(ExploredModels) +1]<-Marginal_BF
     }
-    colnames(New_ExploredModels)[-(1:ncol(ExploredModels))]<-c("Conditional_BF", "Marginal_BF_Estimator")
+    colnames(New_ExploredModels)[-(1:ncol(ExploredModels))]<-c("Log_Marginal_BF_Estimator")
     return(New_ExploredModels)
   }
 
@@ -578,7 +616,7 @@ summary_gibbs<-function(fit, BF=FALSE)
   if(BF==TRUE)
   {
     ExploredModels<-aux_BF(fit,ExploredModels)
-    most_model<-ExploredModels[1,-((ncol(ExploredModels) -2):ncol(ExploredModels)) ]
+    most_model<-ExploredModels[1,-((ncol(ExploredModels) -1):ncol(ExploredModels)) ]
   }else{most_model<-ExploredModels[1,-ncol(ExploredModels)]}
 
   beta_index<-c()
@@ -680,9 +718,6 @@ gen_base_binomial_reg<- function(N, beta, Covariates, ni=rep(1, N))
 #' colnames(Covariates)<-c("X1", "X2", "X3", "X4", "X5")
 #' base<-gen_base_NegBinomial_reg(N, beta, r, Covariates)    #Generating the data
 #' base
-
-
-
 gen_base_NegBinomial_reg<- function(N, beta, r, Covariates)
 {
   if(N<=0){stop(paste("'N' must be a positive integer")) }
@@ -710,3 +745,5 @@ gen_base_NegBinomial_reg<- function(N, beta, r, Covariates)
   colnames(base)[-1]<-colnames(Covariates)
   return(base)
 }
+
+
